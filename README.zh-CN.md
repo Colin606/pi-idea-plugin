@@ -1,0 +1,83 @@
+# pi-idea-plugin
+
+<p align="center"><img src="logo.png" width="160" alt="Pi Selection logo"></p>
+
+[English](README.md) | **简体中文**
+
+IDEA 插件：把编辑器中**当前选中的代码**实时提供给 [Pi coding agent](https://www.npmjs.com/package/@earendil-works/pi-coding-agent)，选中即上下文，无需复制粘贴。
+
+机制对标 Claude Code 的 IDE 集成：**拉模式、实时状态**。
+
+## 工作原理
+
+```
+IDEA 选中代码
+   │ SelectionListener（事件源编辑器，300ms 防抖）
+   ▼
+PiWebSocketServer（应用级单例，多项目共享，仅存内存）
+   ├─ HTTP  http://127.0.0.1:19232/api/selection   实时查询当前选区（Pi 扩展提交 prompt 时拉取）
+   ├─ HTTP  http://127.0.0.1:19232/api/health      健康检查
+   └─ WS    ws://127.0.0.1:19233                   选区变化即时推送（Pi 扩展 widget 实时显示）
+```
+
+选区数据：文件路径/文件名/选中内容/起止行列/语言/光标位置。
+
+服务仅监听 127.0.0.1，不对外网暴露。
+
+## 安装
+
+### 1. IDEA 插件
+
+从 JetBrains Marketplace 搜索 "Pi Selection" 安装，或源码构建：
+
+```bash
+git clone https://github.com/Colin606/pi-idea-plugin.git
+cd pi-idea-plugin
+./gradlew buildPlugin
+```
+
+产物在 `build/distributions/pi-idea-plugin-1.0.0.zip`，IDEA -> Settings -> Plugins -> ⚙ -> Install Plugin from Disk。
+
+要求：JDK 21，IDEA 2024.2+（sinceBuild 242）。
+
+### 2. Pi 侧扩展
+
+插件只负责提供选区状态，Pi 侧还需要一个消费扩展：提交 prompt 时通过 HTTP 拉取当前选区并注入 `<idea-selection>` 上下文。
+
+本仓库 [`pi-extension/idea-selection.ts`](pi-extension/idea-selection.ts) 就是现成实现，安装：
+
+```bash
+# 1. 复制到 pi 全局扩展目录
+mkdir -p ~/.pi/agent/extensions
+cp pi-extension/idea-selection.ts ~/.pi/agent/extensions/
+
+# 2. 重启 pi 会话生效（扩展随会话加载）
+```
+
+扩展提供的能力：
+
+| 能力 | 说明 |
+|------|------|
+| 上下文注入 | 提交 prompt 时 HTTP 实时拉取当前选区，以 `<idea-selection>` 标记注入，模型直接可见 |
+| 一次选中一次注入 | 同一选区只注入第一条 prompt（内容比对跳过），换选区自动注入新内容，新会话重置 |
+| TUI 实时 widget | 编辑区上方显示 `IDEA selection: Xxx.java (起-止行)`，WS 推送实时刷新 |
+| 取消选区即失效 | 拉的是实时状态，IDEA 里取消选中后不再注入 |
+| 手动查看 | pi 内执行 `/selection` 命令查看当前选区及注入状态 |
+
+> 注：IDEA 未启动时扩展静默跳过，不影响 pi 正常使用。
+
+## 使用
+
+1. IDEA 打开任意项目（插件随项目启动自动起服务）
+2. 选中一段代码
+3. 在 Pi 里直接提问——"我选的代码有什么问题"——选区已自动在上下文里
+
+## 配置端口（可选）
+
+```bash
+# HTTP 查询端口默认 19232，WS 推送端口默认 19233，见 PiWebSocketServer
+```
+
+## License
+
+MIT

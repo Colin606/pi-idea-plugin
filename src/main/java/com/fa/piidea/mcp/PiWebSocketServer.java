@@ -14,17 +14,15 @@ import com.intellij.openapi.editor.SelectionModel;
 import com.intellij.openapi.editor.event.SelectionEvent;
 import com.intellij.openapi.editor.event.SelectionListener;
 import com.intellij.openapi.fileEditor.FileDocumentManager;
-import com.intellij.openapi.fileEditor.FileEditorManager;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.vfs.VirtualFile;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
@@ -33,11 +31,13 @@ import java.util.concurrent.TimeUnit;
 import com.sun.net.httpserver.HttpServer;
 
 /**
- * 本地 HTTP 服务 + 选区监听。
+ * 本地选区服务（单例，见 PiServerHolder）。
  *
- * - 实时监听编辑器选区变化（300ms 防抖）
- * - 将选区写入 ~/.pi/selection.md（Pi 降级读取方案）
- * - 通过 http://127.0.0.1:19232/api/selection 提供实时查询接口（Pi 扩展优先使用）
+ * - 监听编辑器选区变化：事件发生时即从事件源编辑器采集（分屏/多项目不会取错），
+ *   300ms 防抖后更新内存状态并推送；选区状态只存内存，Pi 扩展提交 prompt 时
+ *   实时拉取（拉模式，对标 Claude Code IDE 集成），无文件、无过期问题
+ * - HTTP :19232/api/selection 实时查询当前选区、/api/health 健康检查
+ * - WS   :19233 选区变化即时推送（Pi 扩展 widget 实时显示）
  */
 public class PiWebSocketServer implements Disposable {
 
@@ -46,173 +46,161 @@ public class PiWebSocketServer implements Disposable {
     private static final int DEFAULT_PUSH_PORT = 19233;
     private static final Gson GSON = new GsonBuilder().disableHtmlEscaping().create();
 
-    private final Project project;
+    private final Project project; // 仅用于启动失败通知
     private final int port;
     private final ScheduledExecutorService scheduler;
     private final SelectionListener selectionListener;
+    private final ExecutorService httpExecutor;
     private HttpServer httpServer;
     private PiPushServer pushServer;
     private volatile boolean running = false;
 
     private volatile SelectionChangedNotification currentSelection;
+    private volatile SelectionChangedNotification pendingSelection;
+    private volatile boolean hasPending = false;
     private volatile ScheduledFuture<?> pendingUpdate;
 
-    public PiWebSocketServer(@NotNull Project project) {
-        this(project, DEFAULT_PORT);
-    }
-
-    public PiWebSocketServer(@NotNull Project project, int port) {
+    public PiWebSocketServer(@Nullable Project project) {
         this.project = project;
-        this.port = port;
+        this.port = DEFAULT_PORT;
         this.scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
             Thread t = new Thread(r, "Pi-Selection-Server");
             t.setDaemon(true);
             return t;
         });
+        this.httpExecutor = Executors.newCachedThreadPool(r -> {
+            Thread t = new Thread(r, "Pi-Http-Server");
+            t.setDaemon(true);
+            return t;
+        });
 
-        // 监听编辑器选区变化
         this.selectionListener = new SelectionListener() {
             @Override
             public void selectionChanged(@NotNull SelectionEvent e) {
-                scheduleSelectionUpdate();
+                scheduleSelectionUpdate(e.getEditor());
             }
         };
     }
 
-    public void start() {
-        if (running) return;
+    public boolean isRunning() {
+        return running;
+    }
 
-        // 注册选区监听
-        EditorFactory.getInstance().getEventMulticaster().addSelectionListener(selectionListener, this);
+    public boolean start() {
+        if (running) return true;
 
         try {
             httpServer = HttpServer.create(new InetSocketAddress("127.0.0.1", port), 0);
-            httpServer.setExecutor(Executors.newCachedThreadPool());
+            httpServer.setExecutor(httpExecutor);
 
             // 查询当前选区
             httpServer.createContext("/api/selection", exchange -> {
                 SelectionChangedNotification sel = currentSelection;
                 byte[] body = (sel != null ? GSON.toJson(sel) : "{\"type\":\"no_selection\"}")
                         .getBytes(StandardCharsets.UTF_8);
-                exchange.getResponseHeaders().set("Content-Type", "application/json; charset=utf-8");
-                exchange.sendResponseHeaders(200, body.length);
-                exchange.getResponseBody().write(body);
-                exchange.close();
+                try {
+                    exchange.getResponseHeaders().set("Content-Type", "application/json; charset=utf-8");
+                    exchange.sendResponseHeaders(200, body.length);
+                    exchange.getResponseBody().write(body);
+                } finally {
+                    exchange.close();
+                }
             });
 
             // 健康检查
             httpServer.createContext("/api/health", exchange -> {
                 byte[] body = ("{\"status\":\"ok\",\"port\":" + port + "}")
                         .getBytes(StandardCharsets.UTF_8);
-                exchange.getResponseHeaders().set("Content-Type", "application/json; charset=utf-8");
-                exchange.sendResponseHeaders(200, body.length);
-                exchange.getResponseBody().write(body);
-                exchange.close();
+                try {
+                    exchange.getResponseHeaders().set("Content-Type", "application/json; charset=utf-8");
+                    exchange.sendResponseHeaders(200, body.length);
+                    exchange.getResponseBody().write(body);
+                } finally {
+                    exchange.close();
+                }
             });
 
             httpServer.start();
-            running = true;
-            LOG.info("Pi Selection server started on port " + port);
 
-            // 启动 WebSocket 推送服务（真推送，无需轮询）
+            // WebSocket 推送服务（真推送，无需轮询）
             pushServer = new PiPushServer(DEFAULT_PUSH_PORT);
             pushServer.start();
 
-            notify("Pi 选区服务已启动，HTTP " + port + " / WS " + DEFAULT_PUSH_PORT,
-                    NotificationType.INFORMATION);
+            // 服务全部就绪后再注册选区监听，避免启动失败时残留监听器
+            EditorFactory.getInstance().getEventMulticaster().addSelectionListener(selectionListener, this);
+
+            running = true;
+            LOG.info("Pi selection server started, HTTP " + port + " / WS " + DEFAULT_PUSH_PORT);
+            return true;
         } catch (IOException e) {
-            LOG.error("Failed to start Pi Selection server", e);
-            notify("Pi 选区服务启动失败: " + e.getMessage(), NotificationType.ERROR);
+            LOG.error("Failed to start Pi selection server", e);
+            notifyError(PiSelectionBundle.message("server.start.failed", e.getMessage()));
+            return false;
         }
     }
 
     /**
-     * 300ms 防抖后采集当前选区。
+     * 事件发生时立即采集（事件源编辑器，延迟后编辑器可能已切换），
+     * 300ms 防抖只作用于落盘与推送。
      */
-    private void scheduleSelectionUpdate() {
+    private void scheduleSelectionUpdate(@NotNull Editor editor) {
+        ApplicationManager.getApplication().runReadAction(() -> {
+            pendingSelection = capture(editor);
+            hasPending = true;
+        });
         ScheduledFuture<?> pending = pendingUpdate;
         if (pending != null) {
             pending.cancel(false);
         }
-        pendingUpdate = scheduler.schedule(this::captureSelection, 300, TimeUnit.MILLISECONDS);
+        pendingUpdate = scheduler.schedule(this::flush, 300, TimeUnit.MILLISECONDS);
     }
 
-    private void captureSelection() {
-        ApplicationManager.getApplication().runReadAction(() -> {
-            if (project.isDisposed()) return;
+    @Nullable
+    private SelectionChangedNotification capture(@NotNull Editor editor) {
+        if (editor.isDisposed()) return null;
+        Document doc = editor.getDocument();
+        VirtualFile file = FileDocumentManager.getInstance().getFile(doc);
+        if (file == null || !file.isValid()) return null;
 
-            Editor editor = FileEditorManager.getInstance(project).getSelectedTextEditor();
-            if (editor == null) return;
+        SelectionModel sel = editor.getSelectionModel();
+        String text = sel.getSelectedText();
+        if (text == null || text.isEmpty()) return null;
 
-            VirtualFile file = FileDocumentManager.getInstance().getFile(editor.getDocument());
-            if (file == null) return;
+        SelectionChangedNotification n = new SelectionChangedNotification();
+        n.filePath = file.getPath();
+        n.fileName = file.getName();
+        n.selectedText = text;
+        n.language = file.getExtension();
 
-            Document doc = editor.getDocument();
-            SelectionModel sel = editor.getSelectionModel();
-            String text = sel.getSelectedText();
+        int caretOffset = editor.getCaretModel().getOffset();
+        n.cursorLine = doc.getLineNumber(caretOffset) + 1;
+        n.cursorColumn = caretOffset - doc.getLineStartOffset(n.cursorLine - 1) + 1;
 
-            SelectionChangedNotification notification = new SelectionChangedNotification();
-            notification.filePath = file.getPath();
-            notification.fileName = file.getName();
-            notification.selectedText = text != null ? text : "";
-            notification.language = file.getExtension();
-            notification.cursorLine = doc.getLineNumber(editor.getCaretModel().getOffset()) + 1;
-
-            if (text != null && !text.isEmpty()) {
-                notification.type = "selection_changed";
-                notification.startLine = doc.getLineNumber(sel.getSelectionStart()) + 1;
-                notification.endLine = doc.getLineNumber(sel.getSelectionEnd()) + 1;
-                notification.startColumn = sel.getSelectionStart()
-                        - doc.getLineStartOffset(notification.startLine - 1) + 1;
-                notification.endColumn = sel.getSelectionEnd()
-                        - doc.getLineStartOffset(notification.endLine - 1) + 1;
-                currentSelection = notification;
-                // 实时推送给已连接的 Pi 客户端
-                PiPushServer push = pushServer;
-                if (push != null) {
-                    push.broadcastSelection(notification);
-                }
-                writeSelectionToFile(notification);
-            } else {
-                // 取消选区时不覆盖文件，保留最后一次选区，但通知客户端清空
-                currentSelection = null;
-                PiPushServer push = pushServer;
-                if (push != null) {
-                    push.broadcastSelection(null);
-                }
-            }
-        });
+        n.startLine = doc.getLineNumber(sel.getSelectionStart()) + 1;
+        n.endLine = doc.getLineNumber(sel.getSelectionEnd()) + 1;
+        n.startColumn = sel.getSelectionStart() - doc.getLineStartOffset(n.startLine - 1) + 1;
+        n.endColumn = sel.getSelectionEnd() - doc.getLineStartOffset(n.endLine - 1) + 1;
+        return n;
     }
 
-    /**
-     * 降级方案：写入 ~/.pi/selection.md，Pi 直接 read 即可。
-     */
-    private void writeSelectionToFile(SelectionChangedNotification sel) {
-        scheduler.submit(() -> {
-            try {
-                Path dir = Paths.get(System.getProperty("user.home"), ".pi");
-                Files.createDirectories(dir);
-                Path file = dir.resolve("selection.md");
+    private void flush() {
+        if (!hasPending) return;
+        hasPending = false;
+        SelectionChangedNotification n = pendingSelection;
+        pendingSelection = null;
 
-                StringBuilder sb = new StringBuilder();
-                sb.append("<!-- File: ").append(sel.filePath).append(" -->\n");
-                sb.append("<!-- Lines: ").append(sel.startLine).append("-").append(sel.endLine).append(" -->\n\n");
-                sb.append("```").append(sel.language != null ? sel.language : "").append("\n");
-                sb.append(sel.selectedText);
-                sb.append("\n```\n");
-
-                Files.writeString(file, sb.toString(), StandardCharsets.UTF_8);
-            } catch (IOException e) {
-                LOG.warn("Failed to write selection file", e);
-            }
-        });
+        currentSelection = n;
+        PiPushServer push = pushServer;
+        if (push != null) {
+            push.broadcastSelection(n); // n 为 null 时推送 no_selection
+        }
     }
 
-    private void notify(String message, NotificationType type) {
+    private void notifyError(String message) {
         try {
             NotificationGroupManager.getInstance()
                     .getNotificationGroup("PiSelection")
-                    .createNotification("Pi Selection", message, type)
+                    .createNotification("Pi Selection", message, NotificationType.ERROR)
                     .notify(project);
         } catch (Exception ignored) {
         }
@@ -221,10 +209,11 @@ public class PiWebSocketServer implements Disposable {
     @Override
     public void dispose() {
         running = false;
-        scheduler.shutdown();
+        scheduler.shutdownNow();
         if (httpServer != null) {
             httpServer.stop(0);
         }
+        httpExecutor.shutdown();
         if (pushServer != null) {
             try {
                 pushServer.stop(500);

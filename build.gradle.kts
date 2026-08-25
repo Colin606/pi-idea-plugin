@@ -17,14 +17,25 @@ dependencies {
     intellijPlatform {
         intellijIdeaCommunity("2024.2.4")
         instrumentationTools()
+        pluginVerifier()
     }
-    implementation("com.google.code.gson:gson:2.10.1")
+    // gson 由 IntelliJ 平台自带，不重复打包；Java-WebSocket 为第三方库需打包
     implementation("org.java-websocket:Java-WebSocket:1.5.7")
 }
 
 java {
     sourceCompatibility = JavaVersion.VERSION_21
     targetCompatibility = JavaVersion.VERSION_21
+}
+
+intellijPlatform {
+    pluginVerification {
+        ides { recommended() }
+    }
+    publishing {
+        // 上传时提供：JETBRAINS_TOKEN=xxx ./gradlew publishPlugin
+        token = providers.environmentVariable("JETBRAINS_TOKEN").getOrElse("")
+    }
 }
 
 tasks {

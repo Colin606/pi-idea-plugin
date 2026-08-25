@@ -2,17 +2,34 @@
     <id>com.fa.piidea</id>
     <name>Pi Selection</name>
     <version>1.0.0</version>
-    <vendor email="songzonglin@example.com">FA</vendor>
+    <vendor email="colin606@users.noreply.github.com" url="https://github.com/Colin606/pi-idea-plugin">Colin606</vendor>
+    <icon>icons/pluginIcon.png</icon>
 
     <description><![CDATA[
-        Pi Agent IDEA 集成插件。<br/>
-        通过 WebSocket 实时推送代码选区给 Pi Agent，无需手动复制粘贴。<br/>
+        Integrates the <b>Pi coding agent</b> with your IDE: the current editor selection is automatically injected as context when you submit a prompt in Pi — no copy-pasting.<br/>
         <br/>
-        <b>使用方式：</b><br/>
-        1. 安装本插件<br/>
-        2. 在 Pi 中加载 pi-idea-extension 扩展<br/>
-        3. 选中代码后直接在 Pi 中提问即可
+        <b>How it works</b><br/>
+        • The plugin runs a localhost-only service that tracks the active editor selection in real time (in memory, nothing written to disk)<br/>
+        • When you submit a prompt in Pi, a companion Pi extension fetches the current selection over HTTP and injects it as &lt;idea-selection&gt; context<br/>
+        • The same selection is injected only once; picking a new selection switches the context automatically; cancelling the selection stops injection<br/>
+        • A WebSocket channel keeps Pi's status widget updated with the current selection file and lines<br/>
+        <br/>
+        <b>Requirements</b><br/>
+        The <a href="https://github.com/Colin606/pi-idea-plugin">companion Pi extension</a> must be installed (one file, see project README).<br/>
+        <br/>
+        <b>Notes</b><br/>
+        • Listens on 127.0.0.1 only (ports 19232/19233), no external network access<br/>
+        • Single shared service across multiple open projects<br/>
+        • 兼容 Pi Agent：提交 prompt 自动注入 IDEA 当前选中代码，无需复制粘贴
     ]]></description>
+
+    <change-notes><![CDATA[
+        1.0.0:<br/>
+        • Initial release<br/>
+        • Real-time selection tracking (event-source editor, works with split editors and multiple projects)<br/>
+        • HTTP query API (127.0.0.1:19232) + WebSocket push (127.0.0.1:19233)<br/>
+        • Pull-based injection: Pi extension fetches the current selection at prompt time, no stale context
+    ]]></change-notes>
 
     <depends>com.intellij.modules.platform</depends>
 
