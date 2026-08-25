@@ -1,0 +1,23 @@
+<idea-plugin>
+    <id>com.fa.piidea</id>
+    <name>Pi Selection</name>
+    <version>1.0.0</version>
+    <vendor email="songzonglin@example.com">FA</vendor>
+
+    <description><![CDATA[
+        Pi Agent IDEA 集成插件。<br/>
+        通过 WebSocket 实时推送代码选区给 Pi Agent，无需手动复制粘贴。<br/>
+        <br/>
+        <b>使用方式：</b><br/>
+        1. 安装本插件<br/>
+        2. 在 Pi 中加载 pi-idea-extension 扩展<br/>
+        3. 选中代码后直接在 Pi 中提问即可
+    ]]></description>
+
+    <depends>com.intellij.modules.platform</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <notificationGroup id="PiSelection" displayType="BALLOON"/>
+        <postStartupActivity implementation="com.fa.piidea.PiStartupActivity"/>
+    </extensions>
+</idea-plugin>
