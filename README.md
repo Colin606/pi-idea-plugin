@@ -37,7 +37,28 @@ cd pi-idea-plugin
 
 ### 方式二：Pi 侧扩展
 
-插件只负责"推"，Pi 侧需要一个消费扩展（watch `~/.pi/selection.md`，提交 prompt 时注入 `<idea-selection>` 上下文，并在 TUI 显示当前选中），放在 `~/.pi/agent/extensions/` 即可。
+插件只负责“推”，Pi 侧还需要一个消费扩展：读 `~/.pi/selection.md`，提交 prompt 时注入 `<idea-selection>` 上下文，并在 TUI 显示当前选中。
+
+本仓库 [`pi-extension/idea-selection.ts`](pi-extension/idea-selection.ts) 就是现成实现，安装：
+
+```bash
+# 1. 复制到 pi 全局扩展目录
+mkdir -p ~/.pi/agent/extensions
+cp pi-extension/idea-selection.ts ~/.pi/agent/extensions/
+
+# 2. 重启 pi 会话生效（扩展随会话加载）
+```
+
+扩展提供的能力：
+
+| 能力 | 说明 |
+|------|------|
+| 上下文注入 | 每次提交 prompt 前，把当前选区以 `<idea-selection>` 标记自动注入，模型直接可见 |
+| TUI 实时 widget | 编辑区上方显示 `IDEA selection: Xxx.java (起-止行)`，随选区变化实时刷新（150ms 防抖） |
+| 过期保护 | 选中超 24 小时不再注入，避免陈旧内容误导 |
+| 手动查看 | pi 内执行 `/selection` 命令查看当前注入的选中内容 |
+
+> 注：扩展当前走文件降级方案（watch selection.md），插件同源的 HTTP/WS 接口（19232/19233）已就绪，后续可切换为长连接推送。
 
 ## 使用
 
