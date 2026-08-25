@@ -11,18 +11,24 @@ The injection model mirrors Claude Code's IDE integration: **pull-based, live st
 ## How it works
 
 ```
-IDEA selection
-   │ SelectionListener (event-source editor, 300ms debounce)
+IDEA selection (per project window)
+   │ SelectionListener (event-source editor, 300ms debounce, project-scoped)
    ▼
-PiWebSocketServer (application-level singleton, in-memory only)
-   ├─ HTTP  http://127.0.0.1:19232/api/selection   query current selection (Pi extension pulls at prompt time)
-   ├─ HTTP  http://127.0.0.1:19232/api/health      health check
-   └─ WS    ws://127.0.0.1:19233                   instant push for Pi's UI widget
+PiWebSocketServer (one instance per project, in-memory only)
+   ├─ Lock   ~/.pi/ide/ide-<port>.lock          port + project registration (5s heartbeat)
+   ├─ HTTP  http://127.0.0.1:19232+2i/api/selection   query current selection (Pi extension pulls at prompt time)
+   ├─ HTTP  http://127.0.0.1:19232+2i/api/health      health check
+   └─ WS    ws://127.0.0.1:19233+2i                   instant push for Pi's UI widget
 ```
 
 Selection data: file path / file name / selected text / line & column range / language / caret position.
 
-The service listens on `127.0.0.1` only — nothing is exposed to the network.
+The service listens on `127.0.0.1` only - nothing is exposed to the network.
+
+**Multi-IDE isolation:** every project window gets its own service on its own port pair
+(starting at 19232/19233, +2 per window). The Pi extension scans `~/.pi/ide/*.lock`,
+picks the instance whose project contains its working directory, and falls back to the
+most recently active one. Selections from one project never leak into another.
 
 ## Install
 
@@ -36,7 +42,7 @@ cd pi-idea-plugin
 ./gradlew buildPlugin
 ```
 
-The artifact is `build/distributions/pi-idea-plugin-1.0.0.zip` — IDEA → Settings → Plugins → ⚙ → Install Plugin from Disk.
+The artifact is `build/distributions/pi-idea-plugin-1.1.0.zip` - IDEA → Settings → Plugins → ⚙ → Install Plugin from Disk.
 
 Requirements: JDK 21, IDEA 2024.2+ (`sinceBuild` 242).
 
@@ -75,7 +81,8 @@ What the extension provides:
 ## Ports (optional)
 
 ```bash
-# HTTP query port defaults to 19232, WS push port to 19233 (see PiWebSocketServer)
+# Port pairs auto-allocate per project window: HTTP 19232+2i / WS 19233+2i (see PiWebSocketServer)
+# Registration locks live in ~/.pi/ide/ and expire after ~15s without heartbeat
 ```
 
 ## License

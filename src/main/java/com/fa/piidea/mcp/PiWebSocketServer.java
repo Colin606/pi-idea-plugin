@@ -15,13 +15,22 @@ import com.intellij.openapi.editor.event.SelectionEvent;
 import com.intellij.openapi.editor.event.SelectionListener;
 import com.intellij.openapi.fileEditor.FileDocumentManager;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.vfs.VirtualFile;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
+import java.net.ServerSocket;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.AtomicMoveNotSupportedException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -31,38 +40,45 @@ import java.util.concurrent.TimeUnit;
 import com.sun.net.httpserver.HttpServer;
 
 /**
- * 本地选区服务（单例，见 PiServerHolder）。
+ * 本地选区服务（每个项目窗口一个实例，端口自动分配，见 PiStartupActivity）。
  *
- * - 监听编辑器选区变化：事件发生时即从事件源编辑器采集（分屏/多项目不会取错），
- *   300ms 防抖后更新内存状态并推送；选区状态只存内存，Pi 扩展提交 prompt 时
- *   实时拉取（拉模式，对标 Claude Code IDE 集成），无文件、无过期问题
- * - HTTP :19232/api/selection 实时查询当前选区、/api/health 健康检查
- * - WS   :19233 选区变化即时推送（Pi 扩展 widget 实时显示）
+ * - 监听本项目编辑器的选区变化：事件发生时即从事件源编辑器采集（分屏/多项目不会取错），
+ *   300ms 防抖后更新内存状态并推送；只跟踪本项目窗口的编辑器，多项目/多 IDE 完全隔离
+ * - 端口：从 19232/19233 起，每个项目窗口占用一对（HTTP 19232+2i / WS 19233+2i），
+ *   并在 ~/.pi/ide/ 下写锁文件注册端口与项目路径（心跳 5s），Pi 扩展按 cwd 匹配项目
+ * - HTTP /api/selection 实时查询当前选区、/api/health 健康检查
+ * - WS   选区变化即时推送（Pi 扩展 widget 实时显示）
  */
 public class PiWebSocketServer implements Disposable {
 
     private static final Logger LOG = Logger.getInstance(PiWebSocketServer.class);
-    private static final int DEFAULT_PORT = 19232;
-    private static final int DEFAULT_PUSH_PORT = 19233;
+    private static final int BASE_HTTP_PORT = 19232;
+    private static final int BASE_PUSH_PORT = 19233;
+    /** 最多支持 10 个项目窗口并行（两个 IDE 进程各开多项目也够用） */
+    private static final int MAX_PORT_ATTEMPTS = 10;
+    private static final Path LOCK_DIR = Paths.get(System.getProperty("user.home"), ".pi", "ide");
+    private static final long HEARTBEAT_MS = 5000L;
     private static final Gson GSON = new GsonBuilder().disableHtmlEscaping().create();
 
-    private final Project project; // 仅用于启动失败通知
-    private final int port;
+    private final Project project;
     private final ScheduledExecutorService scheduler;
     private final SelectionListener selectionListener;
     private final ExecutorService httpExecutor;
     private HttpServer httpServer;
     private PiPushServer pushServer;
     private volatile boolean running = false;
+    private int port = -1;
+    private int pushPort = -1;
+    private Path lockFile;
+    private ScheduledFuture<?> heartbeat;
 
     private volatile SelectionChangedNotification currentSelection;
     private volatile SelectionChangedNotification pendingSelection;
     private volatile boolean hasPending = false;
     private volatile ScheduledFuture<?> pendingUpdate;
 
-    public PiWebSocketServer(@Nullable Project project) {
+    public PiWebSocketServer(@NotNull Project project) {
         this.project = project;
-        this.port = DEFAULT_PORT;
         this.scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
             Thread t = new Thread(r, "Pi-Selection-Server");
             t.setDaemon(true);
@@ -77,6 +93,9 @@ public class PiWebSocketServer implements Disposable {
         this.selectionListener = new SelectionListener() {
             @Override
             public void selectionChanged(@NotNull SelectionEvent e) {
+                // 只跟踪本项目窗口的编辑器，其他项目窗口的事件交给各自的实例
+                Project p = e.getEditor().getProject();
+                if (p != null && p != PiWebSocketServer.this.project) return;
                 scheduleSelectionUpdate(e.getEditor());
             }
         };
@@ -86,15 +105,46 @@ public class PiWebSocketServer implements Disposable {
         return running;
     }
 
+    /** 当前 HTTP 端口（未启动为 -1，用于日志/诊断）。 */
+    public int getPort() {
+        return port;
+    }
+
     public boolean start() {
         if (running) return true;
+        synchronized (PiWebSocketServer.class) {
+            if (running) return true;
+            for (int i = 0; i < MAX_PORT_ATTEMPTS; i++) {
+                int httpPort = BASE_HTTP_PORT + i * 2;
+                int wsPort = BASE_PUSH_PORT + i * 2;
+                if (!tryStart(httpPort, wsPort)) continue;
+                port = httpPort;
+                pushPort = wsPort;
+                lockFile = LOCK_DIR.resolve("ide-" + httpPort + ".lock");
+                heartbeat = scheduler.scheduleAtFixedRate(this::writeLock, 0, HEARTBEAT_MS, TimeUnit.MILLISECONDS);
+                running = true;
+                LOG.info("Pi selection server started for project " + project.getName()
+                        + ", HTTP " + port + " / WS " + pushPort + " (" + lockFile + ")");
+                return true;
+            }
+        }
+        String range = BASE_HTTP_PORT + "-" + (BASE_HTTP_PORT + (MAX_PORT_ATTEMPTS - 1) * 2);
+        LOG.warn("Pi selection server failed to start: no free port in range " + range);
+        notifyError(PiSelectionBundle.message("server.start.failed", "no free port in " + range));
+        return false;
+    }
 
+    /** 尝试占用一对端口并启动两个服务，任一失败则回滚并返回 false。 */
+    private boolean tryStart(int httpPort, int wsPort) {
+        if (!portAvailable(httpPort) || !portAvailable(wsPort)) return false;
+        HttpServer http = null;
+        PiPushServer push = null;
         try {
-            httpServer = HttpServer.create(new InetSocketAddress("127.0.0.1", port), 0);
-            httpServer.setExecutor(httpExecutor);
+            http = HttpServer.create(new InetSocketAddress("127.0.0.1", httpPort), 0);
+            http.setExecutor(httpExecutor);
 
             // 查询当前选区
-            httpServer.createContext("/api/selection", exchange -> {
+            http.createContext("/api/selection", exchange -> {
                 SelectionChangedNotification sel = currentSelection;
                 byte[] body = (sel != null ? GSON.toJson(sel) : "{\"type\":\"no_selection\"}")
                         .getBytes(StandardCharsets.UTF_8);
@@ -108,9 +158,13 @@ public class PiWebSocketServer implements Disposable {
             });
 
             // 健康检查
-            httpServer.createContext("/api/health", exchange -> {
-                byte[] body = ("{\"status\":\"ok\",\"port\":" + port + "}")
-                        .getBytes(StandardCharsets.UTF_8);
+            http.createContext("/api/health", exchange -> {
+                Map<String, Object> resp = new LinkedHashMap<>();
+                resp.put("status", "ok");
+                resp.put("port", httpPort);
+                resp.put("wsPort", wsPort);
+                resp.put("projectPath", project.getBasePath());
+                byte[] body = GSON.toJson(resp).getBytes(StandardCharsets.UTF_8);
                 try {
                     exchange.getResponseHeaders().set("Content-Type", "application/json; charset=utf-8");
                     exchange.sendResponseHeaders(200, body.length);
@@ -120,28 +174,66 @@ public class PiWebSocketServer implements Disposable {
                 }
             });
 
-            httpServer.start();
+            http.start();
+            push = new PiPushServer(wsPort);
+            push.start();
+        } catch (IOException | RuntimeException e) {
+            LOG.warn("Pi selection server failed to bind " + httpPort + "/" + wsPort + ": " + e.getMessage());
+            if (push != null) {
+                try { push.stop(100); } catch (Exception ignored) { }
+            }
+            if (http != null) {
+                http.stop(0);
+            }
+            return false;
+        }
+        httpServer = http;
+        pushServer = push;
 
-            // WebSocket 推送服务（真推送，无需轮询）
-            pushServer = new PiPushServer(DEFAULT_PUSH_PORT);
-            pushServer.start();
+        // 服务全部就绪后再注册选区监听，避免启动失败时残留监听器
+        EditorFactory.getInstance().getEventMulticaster().addSelectionListener(selectionListener, this);
+        return true;
+    }
 
-            // 服务全部就绪后再注册选区监听，避免启动失败时残留监听器
-            EditorFactory.getInstance().getEventMulticaster().addSelectionListener(selectionListener, this);
-
-            running = true;
-            LOG.info("Pi selection server started, HTTP " + port + " / WS " + DEFAULT_PUSH_PORT);
+    /** 端口预检：能绑定即视为空闲（本机场景，竞态窗口极小）。 */
+    private static boolean portAvailable(int port) {
+        try (ServerSocket ss = new ServerSocket()) {
+            ss.setReuseAddress(true);
+            ss.bind(new InetSocketAddress("127.0.0.1", port), 1);
             return true;
         } catch (IOException e) {
-            LOG.error("Failed to start Pi selection server", e);
-            notifyError(PiSelectionBundle.message("server.start.failed", e.getMessage()));
             return false;
+        }
+    }
+
+    /** 写注册锁文件（心跳），Pi 扩展靠它发现本实例。 */
+    private void writeLock() {
+        if (!running) return;
+        try {
+            Files.createDirectories(LOCK_DIR);
+            Map<String, Object> lock = new LinkedHashMap<>();
+            lock.put("version", 1);
+            lock.put("httpPort", port);
+            lock.put("wsPort", pushPort);
+            lock.put("projectPath", project.getBasePath());
+            lock.put("projectName", project.getName());
+            lock.put("pid", ProcessHandle.current().pid());
+            lock.put("updatedAt", System.currentTimeMillis());
+            Path tmp = lockFile.resolveSibling(lockFile.getFileName() + ".tmp");
+            Files.write(tmp, GSON.toJson(lock).getBytes(StandardCharsets.UTF_8));
+            try {
+                Files.move(tmp, lockFile, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+            } catch (AtomicMoveNotSupportedException e) {
+                Files.move(tmp, lockFile, StandardCopyOption.REPLACE_EXISTING);
+            }
+        } catch (Exception e) {
+            LOG.warn("Failed to write Pi lock file: " + e.getMessage());
         }
     }
 
     /**
      * 事件发生时立即采集（事件源编辑器，延迟后编辑器可能已切换），
-     * 300ms 防抖只作用于落盘与推送。
+     * 300ms 防抖只作用于状态更新与推送。
      */
     private void scheduleSelectionUpdate(@NotNull Editor editor) {
         ApplicationManager.getApplication().runReadAction(() -> {
@@ -171,6 +263,7 @@ public class PiWebSocketServer implements Disposable {
         n.fileName = file.getName();
         n.selectedText = text;
         n.language = file.getExtension();
+        n.projectPath = project.getBasePath();
 
         int caretOffset = editor.getCaretModel().getOffset();
         n.cursorLine = doc.getLineNumber(caretOffset) + 1;
@@ -219,6 +312,13 @@ public class PiWebSocketServer implements Disposable {
                 pushServer.stop(500);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
+            }
+        }
+        if (lockFile != null) {
+            try {
+                Files.deleteIfExists(lockFile);
+            } catch (IOException e) {
+                LOG.warn("Failed to delete Pi lock file: " + e.getMessage());
             }
         }
     }

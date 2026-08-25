@@ -11,18 +11,23 @@ IDEA 插件：把编辑器中**当前选中的代码**实时提供给 [Pi coding
 ## 工作原理
 
 ```
-IDEA 选中代码
-   │ SelectionListener（事件源编辑器，300ms 防抖）
+IDEA 选中代码（每个项目窗口独立）
+   │ SelectionListener（事件源编辑器，300ms 防抖，按项目过滤）
    ▼
-PiWebSocketServer（应用级单例，多项目共享，仅存内存）
-   ├─ HTTP  http://127.0.0.1:19232/api/selection   实时查询当前选区（Pi 扩展提交 prompt 时拉取）
-   ├─ HTTP  http://127.0.0.1:19232/api/health      健康检查
-   └─ WS    ws://127.0.0.1:19233                   选区变化即时推送（Pi 扩展 widget 实时显示）
+PiWebSocketServer（每项目一个实例，仅存内存）
+   ├─ Lock   ~/.pi/ide/ide-<port>.lock          端口+项目注册（5s 心跳）
+   ├─ HTTP  http://127.0.0.1:19232+2i/api/selection   实时查询当前选区（Pi 扩展提交 prompt 时拉取）
+   ├─ HTTP  http://127.0.0.1:19232+2i/api/health      健康检查
+   └─ WS    ws://127.0.0.1:19233+2i                   选区变化即时推送（Pi 扩展 widget 实时显示）
 ```
 
 选区数据：文件路径/文件名/选中内容/起止行列/语言/光标位置。
 
 服务仅监听 127.0.0.1，不对外网暴露。
+
+**多 IDE 隔离**：每个项目窗口独立服务、独立端口对（从 19232/19233 起，每窗口 +2）。
+Pi 扩展扫描 `~/.pi/ide/*.lock`，优先选 cwd 所属项目的实例，匹配不上退到最近活跃实例。
+不同项目之间的选区互不串扰。
 
 ## 安装
 
@@ -36,7 +41,7 @@ cd pi-idea-plugin
 ./gradlew buildPlugin
 ```
 
-产物在 `build/distributions/pi-idea-plugin-1.0.0.zip`，IDEA -> Settings -> Plugins -> ⚙ -> Install Plugin from Disk。
+产物在 `build/distributions/pi-idea-plugin-1.1.0.zip`，IDEA -> Settings -> Plugins -> ⚙ -> Install Plugin from Disk。
 
 要求：JDK 21，IDEA 2024.2+（sinceBuild 242）。
 
@@ -75,7 +80,8 @@ cp pi-extension/idea-selection.ts ~/.pi/agent/extensions/
 ## 配置端口（可选）
 
 ```bash
-# HTTP 查询端口默认 19232，WS 推送端口默认 19233，见 PiWebSocketServer
+# 端口对按项目窗口自动分配：HTTP 19232+2i / WS 19233+2i（见 PiWebSocketServer）
+# 注册锁文件在 ~/.pi/ide/，心跳停止 ~15s 后自动过期
 ```
 
 ## License

@@ -34,6 +34,9 @@ public class SelectionChangedNotification {
     @SerializedName("language")
     public String language;
 
+    @SerializedName("project_path")
+    public String projectPath;
+
     @SerializedName("cursor_line")
     public int cursorLine;
 

@@ -1,7 +1,7 @@
 <idea-plugin>
     <id>com.fa.piidea</id>
     <name>Pi Selection</name>
-    <version>1.0.0</version>
+    <version>1.1.0</version>
     <vendor email="colin606@users.noreply.github.com" url="https://github.com/Colin606/pi-idea-plugin">Colin606</vendor>
     <icon>icons/pluginIcon.png</icon>
 
@@ -18,16 +18,19 @@
         The <a href="https://github.com/Colin606/pi-idea-plugin">companion Pi extension</a> must be installed (one file, see project README).<br/>
         <br/>
         <b>Notes</b><br/>
-        • Listens on 127.0.0.1 only (ports 19232/19233), no external network access<br/>
-        • Single shared service across multiple open projects<br/>
+        • Listens on 127.0.0.1 only (ports 19232+), no external network access<br/>
+        • Per-project service: multiple IDE windows / instances are fully isolated (port auto-allocation, discovered via ~/.pi/ide lock files)<br/>
         • 兼容 Pi Agent：提交 prompt 自动注入 IDEA 当前选中代码，无需复制粘贴
     ]]></description>
 
     <change-notes><![CDATA[
+        1.1.0:<br/>
+        • Multi-IDE isolation: one service per project window, port auto-allocation (19232+2i), lock-file discovery in ~/.pi/ide/<br/>
+        • Pi extension picks the server whose project matches its working directory (falls back to most recently active)<br/>
         1.0.0:<br/>
         • Initial release<br/>
         • Real-time selection tracking (event-source editor, works with split editors and multiple projects)<br/>
-        • HTTP query API (127.0.0.1:19232) + WebSocket push (127.0.0.1:19233)<br/>
+        • HTTP query + WebSocket push on auto-allocated ports (19232+2i / 19233+2i per project window)<br/>
         • Pull-based injection: Pi extension fetches the current selection at prompt time, no stale context
     ]]></change-notes>
 
