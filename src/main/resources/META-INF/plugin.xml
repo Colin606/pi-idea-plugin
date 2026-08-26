@@ -1,7 +1,7 @@
 <idea-plugin>
     <id>com.fa.piidea</id>
     <name>Pi Selection</name>
-    <version>1.1.0</version>
+    <version>1.2.0</version>
     <vendor email="colin606@users.noreply.github.com" url="https://github.com/Colin606/pi-idea-plugin">Colin606</vendor>
     <icon>icons/pluginIcon.png</icon>
 
@@ -15,15 +15,18 @@
         • A WebSocket channel keeps Pi's status widget updated with the current selection file and lines<br/>
         <br/>
         <b>Requirements</b><br/>
-        The <a href="https://github.com/Colin606/pi-idea-plugin">companion Pi extension</a> must be installed (one file, see project README).<br/>
+        A <a href="https://github.com/Colin606/pi-idea-plugin">Pi coding agent</a> installation — the companion extension is deployed automatically by this plugin.<br/>
         <br/>
         <b>Notes</b><br/>
         • Listens on 127.0.0.1 only (ports 19232+), no external network access<br/>
         • Per-project service: multiple IDE windows / instances are fully isolated (port auto-allocation, discovered via ~/.pi/ide lock files)<br/>
-        • 兼容 Pi Agent：提交 prompt 自动注入 IDEA 当前选中代码，无需复制粘贴
+        • Installs and keeps the companion Pi extension up to date automatically (~/.pi/agent/extensions/)<br/>
+        • 兼容 Pi Agent：提交 prompt 自动注入 IDEA 当前选中代码，无需复制粘贴；Pi 侧扩展随插件自动部署<br/>
     ]]></description>
 
     <change-notes><![CDATA[
+        1.2.0:<br/>
+        • Auto-deploy: the Pi-side extension is bundled in the plugin and installed/updated to ~/.pi/agent/extensions/ automatically on IDE startup (old copy backed up as .bak)<br/>
         1.1.0:<br/>
         • Multi-IDE isolation: one service per project window, port auto-allocation (19232+2i), lock-file discovery in ~/.pi/ide/<br/>
         • Pi extension picks the server whose project matches its working directory (falls back to most recently active)<br/>

@@ -4,7 +4,7 @@ plugins {
 }
 
 group = "com.fa"
-version = "1.1.0"
+version = "1.2.0"
 
 repositories {
     mavenCentral()
@@ -41,6 +41,12 @@ intellijPlatform {
 tasks {
     buildSearchableOptions {
         enabled = false
+    }
+    // 单一源头：pi-extension/idea-selection.ts 直接打进 jar，插件启动时自动部署到 ~/.pi/agent/extensions/
+    processResources {
+        from("pi-extension/idea-selection.ts") {
+            into("pi")
+        }
     }
     patchPluginXml {
         sinceBuild = "242"

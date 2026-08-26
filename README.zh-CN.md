@@ -41,22 +41,20 @@ cd pi-idea-plugin
 ./gradlew buildPlugin
 ```
 
-产物在 `build/distributions/pi-idea-plugin-1.1.0.zip`，IDEA -> Settings -> Plugins -> ⚙ -> Install Plugin from Disk。
+产物在 `build/distributions/pi-idea-plugin-1.2.0.zip`，IDEA -> Settings -> Plugins -> ⚙ -> Install Plugin from Disk。
 
 要求：JDK 21，IDEA 2024.2+（sinceBuild 242）。
 
-### 2. Pi 侧扩展
+### 2. Pi 侧扩展（自动安装，无需手动）
 
-插件只负责提供选区状态，Pi 侧还需要一个消费扩展：提交 prompt 时通过 HTTP 拉取当前选区并注入 `<idea-selection>` 上下文。
+插件 1.2.0 起内置 Pi 侧扩展：IDEA 启动时自动安装/更新到 `~/.pi/agent/extensions/idea-selection.ts`（升级时旧版备份为 `.bak`），重启 pi 会话即生效。
 
-本仓库 [`pi-extension/idea-selection.ts`](pi-extension/idea-selection.ts) 就是现成实现，安装：
+想手动装（或预览源码）也可以，仓库源码在 [`pi-extension/idea-selection.ts`](pi-extension/idea-selection.ts)：
 
 ```bash
-# 1. 复制到 pi 全局扩展目录
 mkdir -p ~/.pi/agent/extensions
 cp pi-extension/idea-selection.ts ~/.pi/agent/extensions/
-
-# 2. 重启 pi 会话生效（扩展随会话加载）
+# 重启 pi 会话生效；注意手动装后插件不会再覆盖同版本文件
 ```
 
 扩展提供的能力：

@@ -19,6 +19,8 @@ import { readdirSync, readFileSync, realpathSync } from "node:fs";
  */
 
 const LOCK_DIR = join(homedir(), ".pi", "ide");
+/** 与插件版本同步递增，插件用它判断是否需要更新已部署的扩展 */
+const EXTENSION_VERSION = "1.2.0";
 const BASE_HTTP_PORT = 19232;
 const BASE_WS_PORT = 19233;
 const WIDGET_ID = "idea-selection";

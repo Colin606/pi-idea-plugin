@@ -42,22 +42,20 @@ cd pi-idea-plugin
 ./gradlew buildPlugin
 ```
 
-The artifact is `build/distributions/pi-idea-plugin-1.1.0.zip` - IDEA → Settings → Plugins → ⚙ → Install Plugin from Disk.
+The artifact is `build/distributions/pi-idea-plugin-1.2.0.zip` - IDEA → Settings → Plugins → ⚙ → Install Plugin from Disk.
 
 Requirements: JDK 21, IDEA 2024.2+ (`sinceBuild` 242).
 
-### 2. Pi-side extension
+### 2. Pi-side extension (installed automatically)
 
-The plugin only exposes the selection state; Pi needs a companion extension that pulls it and injects `<idea-selection>` context on each prompt.
+Since 1.2.0 the plugin bundles the Pi-side extension: on IDE startup it is deployed/updated to `~/.pi/agent/extensions/idea-selection.ts` (previous copy backed up as `.bak` on upgrade). Just restart your pi session.
 
-This repo ships one: [`pi-extension/idea-selection.ts`](pi-extension/idea-selection.ts). Install:
+Manual install still works if you prefer — source lives at [`pi-extension/idea-selection.ts`](pi-extension/idea-selection.ts):
 
 ```bash
-# 1. Copy to the pi global extensions directory
 mkdir -p ~/.pi/agent/extensions
 cp pi-extension/idea-selection.ts ~/.pi/agent/extensions/
-
-# 2. Restart your pi session
+# note: the plugin won't overwrite a manually installed file of the same version
 ```
 
 What the extension provides:
