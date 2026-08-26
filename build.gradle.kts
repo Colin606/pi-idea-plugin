@@ -33,8 +33,10 @@ intellijPlatform {
         ides { recommended() }
     }
     publishing {
-        // 上传时提供：JETBRAINS_TOKEN=xxx ./gradlew publishPlugin
-        token = providers.environmentVariable("JETBRAINS_TOKEN").getOrElse("")
+        // token 优先级：环境变量 > ~/.gradle/gradle.properties（推荐后者，永久且不进仓库）
+        token = providers.gradleProperty("JETBRAINS_TOKEN")
+            .orElse(providers.environmentVariable("JETBRAINS_TOKEN"))
+            .getOrElse("")
     }
 }
 
