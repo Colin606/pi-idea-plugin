@@ -1,6 +1,6 @@
 <idea-plugin>
     <id>com.fa.piidea</id>
-    <name>Pi Selection</name>
+    <name>Pi Agent Selection</name>
     <version>1.2.0</version>
     <vendor email="colin606@users.noreply.github.com" url="https://github.com/Colin606/pi-idea-plugin">Colin606</vendor>
     <icon>icons/pluginIcon.png</icon>

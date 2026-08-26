@@ -33,7 +33,7 @@ Pi 扩展扫描 `~/.pi/ide/*.lock`，优先选 cwd 所属项目的实例，匹�
 
 ### 1. IDEA 插件
 
-从 JetBrains Marketplace 搜索 "Pi Selection" 安装，或源码构建：
+从 JetBrains Marketplace 搜索 "Pi Agent Selection" 安装，或源码构建：
 
 ```bash
 git clone https://github.com/Colin606/pi-idea-plugin.git

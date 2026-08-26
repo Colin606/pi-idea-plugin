@@ -293,7 +293,7 @@ public class PiWebSocketServer implements Disposable {
         try {
             NotificationGroupManager.getInstance()
                     .getNotificationGroup("PiSelection")
-                    .createNotification("Pi Selection", message, NotificationType.ERROR)
+                    .createNotification("Pi Agent Selection", message, NotificationType.ERROR)
                     .notify(project);
         } catch (Exception ignored) {
         }

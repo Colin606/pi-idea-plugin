@@ -34,7 +34,7 @@ most recently active one. Selections from one project never leak into another.
 
 ### 1. IDEA plugin
 
-Install from JetBrains Marketplace ("Pi Selection"), or build from source:
+Install from JetBrains Marketplace ("Pi Agent Selection"), or build from source:
 
 ```bash
 git clone https://github.com/Colin606/pi-idea-plugin.git

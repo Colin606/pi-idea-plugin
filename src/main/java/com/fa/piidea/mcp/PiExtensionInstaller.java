@@ -96,7 +96,7 @@ public final class PiExtensionInstaller {
         try {
             NotificationGroupManager.getInstance()
                     .getNotificationGroup("PiSelection")
-                    .createNotification("Pi Selection", message, type)
+                    .createNotification("Pi Agent Selection", message, type)
                     .notify(project);
         } catch (Exception ignored) {
         }
