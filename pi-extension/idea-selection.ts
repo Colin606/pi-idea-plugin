@@ -14,13 +14,13 @@ import { readdirSync, readFileSync, realpathSync } from "node:fs";
  *    按 cwd 匹配所属项目，取不到时退到最近活跃的实例；
  * 2. 提交 prompt 时通过 HTTP 实时拉取当前选区（拉模式，读的是内存实时状态，
  *    天然不会过期/残留），注入 <idea-selection> 上下文；
- * 3. 同一选区只注入一次（内容比对跳过），新会话自动重置；
+ * 3. 同一选区只注入一次（内容比对跳过），注入后即消费（widget 清空，重新选中同段代码也不再显示/注入），新会话自动重置；
  * 4. TUI 编辑区上方以 widget 实时显示当前选中（WebSocket 推送）。
  */
 
 const LOCK_DIR = join(homedir(), ".pi", "ide");
 /** 与插件版本同步递增，插件用它判断是否需要更新已部署的扩展 */
-const EXTENSION_VERSION = "1.3.3";
+const EXTENSION_VERSION = "1.3.4";
 const BASE_HTTP_PORT = 19232;
 const BASE_WS_PORT = 19233;
 const WIDGET_ID = "idea-selection";
@@ -172,8 +172,8 @@ export default function (pi: ExtensionAPI) {
   let reconnectTimer: NodeJS.Timeout | undefined;
   let shuttingDown = false;
   let widgetCtx: any;
-  // 上次已注入的内容（会话级）：相同选区跳过，避免重复占用上下文
-  let lastInjected: string | undefined;
+  // 已注入内容集合（会话级）：同一选区只注入一次；注入即消费，重新选中也不重复
+  const injectedSet = new Set<string>();
 
   const setWidgetLines = (lines: string[]) => {
     widgetCtx?.ui.setWidget(WIDGET_ID, lines);
@@ -211,8 +211,14 @@ export default function (pi: ExtensionAPI) {
     ws.onmessage = (ev: MessageEvent) => {
       try {
         const data = JSON.parse(String(ev.data));
+        if (data?.type === "no_selection") {
+          // 取消选中：清空 widget，避免残留旧选区误导
+          setWidgetLines([]);
+          return;
+        }
         if (data?.type === "selection_changed") {
-          setWidgetLines([summarize(data)]);
+          // 已注入过的选区不再显示（重新选中同段代码也一样）
+          setWidgetLines(injectedSet.has(toMarkdown(data)) ? [] : [summarize(data)]);
           return;
         }
         // IDEA "发送到 Pi"：把引用直接粘进输入框，用户在旁边打说明。
@@ -257,8 +263,9 @@ export default function (pi: ExtensionAPI) {
     const sel = await fetchSelection(process.cwd());
     if (!sel) return;
     const content = toMarkdown(sel);
-    if (content === lastInjected) return;
-    lastInjected = content;
+    if (injectedSet.has(content)) return; // 已注入过的选区不再注入（即使仍选中）
+    injectedSet.add(content);
+    setWidgetLines([]); // 注入即消费：widget 清空，不再显示
     return {
       message: {
         customType: "idea-selection",
@@ -280,7 +287,7 @@ export default function (pi: ExtensionAPI) {
 
   pi.on("session_start", async (_event, ctx) => {
     shuttingDown = false;
-    lastInjected = undefined; // 新会话重置：允许重新注入
+    injectedSet.clear(); // 新会话重置：允许重新注入
     connect(process.cwd());
     if (ctx.mode === "tui") {
       widgetCtx = ctx;
@@ -312,7 +319,7 @@ export default function (pi: ExtensionAPI) {
         return;
       }
       const content = toMarkdown(sel);
-      const state = content === lastInjected ? "已注入过，相同选区后续跳过" : "将在下次提问时注入";
+      const state = injectedSet.has(content) ? "已注入过，不再重复注入" : "将在下次提问时注入";
       ctx.ui.notify(`[${state}]\n${content.slice(0, 800)}`, "info");
     },
   });
