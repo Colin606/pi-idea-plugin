@@ -1,4 +1,4 @@
-package com.fa.piidea.mcp;
+package com.pi.piidea.mcp;
 
 import com.google.gson.annotations.SerializedName;
 

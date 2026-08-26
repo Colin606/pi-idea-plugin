@@ -1,7 +1,7 @@
-package com.fa.piidea;
+package com.pi.piidea;
 
-import com.fa.piidea.mcp.PiExtensionInstaller;
-import com.fa.piidea.mcp.PiWebSocketServer;
+import com.pi.piidea.mcp.PiExtensionInstaller;
+import com.pi.piidea.mcp.PiWebSocketServer;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.startup.ProjectActivity;
 import com.intellij.openapi.util.Disposer;

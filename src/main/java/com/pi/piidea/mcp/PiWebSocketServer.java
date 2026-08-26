@@ -1,4 +1,4 @@
-package com.fa.piidea.mcp;
+package com.pi.piidea.mcp;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
@@ -16,6 +16,7 @@ import com.intellij.openapi.editor.event.SelectionListener;
 import com.intellij.openapi.fileEditor.FileDocumentManager;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Disposer;
+import com.intellij.openapi.util.Key;
 import com.intellij.openapi.vfs.VirtualFile;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -77,6 +78,13 @@ public class PiWebSocketServer implements Disposable {
     private volatile boolean hasPending = false;
     private volatile ScheduledFuture<?> pendingUpdate;
 
+    private static final Key<PiWebSocketServer> INSTANCE_KEY = Key.create("PiWebSocketServer");
+
+    /** 本项目窗口的服务实例（启动成功后可取，供 action 发送引用）。 */
+    public static @Nullable PiWebSocketServer getInstance(@Nullable Project project) {
+        return project == null ? null : project.getUserData(INSTANCE_KEY);
+    }
+
     public PiWebSocketServer(@NotNull Project project) {
         this.project = project;
         this.scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
@@ -123,6 +131,7 @@ public class PiWebSocketServer implements Disposable {
                 lockFile = LOCK_DIR.resolve("ide-" + httpPort + ".lock");
                 heartbeat = scheduler.scheduleAtFixedRate(this::writeLock, 0, HEARTBEAT_MS, TimeUnit.MILLISECONDS);
                 running = true;
+                project.putUserData(INSTANCE_KEY, this);
                 LOG.info("Pi selection server started for project " + project.getName()
                         + ", HTTP " + port + " / WS " + pushPort + " (" + lockFile + ")");
                 return true;
@@ -193,6 +202,12 @@ public class PiWebSocketServer implements Disposable {
         // 服务全部就绪后再注册选区监听，避免启动失败时残留监听器
         EditorFactory.getInstance().getEventMulticaster().addSelectionListener(selectionListener, this);
         return true;
+    }
+
+    /** 把引用粘贴进 pi 输入框（见 SendToPiAction）。 @return false = 服务未启动或 pi 未连接。 */
+    public boolean sendPinToPi(@NotNull String reference) {
+        PiPushServer push = pushServer;
+        return running && push != null && push.broadcastPin(reference);
     }
 
     /** 端口预检：能绑定即视为空闲（本机场景，竞态窗口极小）。 */
@@ -302,6 +317,7 @@ public class PiWebSocketServer implements Disposable {
     @Override
     public void dispose() {
         running = false;
+        project.putUserData(INSTANCE_KEY, null);
         scheduler.shutdownNow();
         if (httpServer != null) {
             httpServer.stop(0);

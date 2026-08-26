@@ -20,7 +20,7 @@ import { readdirSync, readFileSync, realpathSync } from "node:fs";
 
 const LOCK_DIR = join(homedir(), ".pi", "ide");
 /** 与插件版本同步递增，插件用它判断是否需要更新已部署的扩展 */
-const EXTENSION_VERSION = "1.2.0";
+const EXTENSION_VERSION = "1.3.3";
 const BASE_HTTP_PORT = 19232;
 const BASE_WS_PORT = 19233;
 const WIDGET_ID = "idea-selection";
@@ -45,6 +45,34 @@ interface IdeInstance {
   projectPath: string | null;
   projectName: string | null;
   updatedAt: number;
+}
+
+/** 单条引用最多展开的行数，防止一次注入撑爆上下文 */
+const MAX_EXPAND_LINES = 400;
+/** 单次提交最多展开的引用条数 */
+const MAX_EXPAND_REFS = 20;
+const REF_RE = /@((?:[A-Za-z]:)?[/\\][^\s@]*?)#L(\d+)(?:-(\d+))?/g;
+const REF_TEST = /@(?:[A-Za-z]:)?[/\\][^\s@]*?#L\d+(?:-\d+)?/;
+
+/** 把提交文本里的 @/path/File.java#L16-23 展开为真实代码（原引用保留）。 */
+function expandReferences(text: string): string {
+  let count = 0;
+  return text.replace(REF_RE, (whole, path: string, s: string, maybeE: string | undefined) => {
+    if (++count > MAX_EXPAND_REFS) return whole;
+    const start = Number(s);
+    const end = maybeE ? Number(maybeE) : start;
+    if (!(start >= 1 && end >= start && end - start + 1 <= MAX_EXPAND_LINES)) return whole;
+    let content: string;
+    try {
+      const lines = readFileSync(path, "utf8").split(/\r?\n/);
+      if (end > lines.length) return whole;
+      content = lines.slice(start - 1, end).join("\n");
+    } catch {
+      return whole; // 文件读不到（不存在/权限），保留原引用
+    }
+    const ext = path.lastIndexOf(".") > path.lastIndexOf("/") ? path.slice(path.lastIndexOf(".") + 1) : "";
+    return `${whole}\n\`\`\`${ext}\n${content}\n\`\`\``;
+  });
 }
 
 /** 扫描 ~/.pi/ide/*.lock，过滤掉心跳过期的实例。 */
@@ -151,6 +179,14 @@ export default function (pi: ExtensionAPI) {
     widgetCtx?.ui.setWidget(WIDGET_ID, lines);
   };
 
+  const sendActivity = () => {
+    try {
+      ws?.send(JSON.stringify({ type: "activity", pid: process.pid, ts: Date.now() }));
+    } catch {
+      // 未连接时忽略
+    }
+  };
+
   const connect = (cwd: string) => {
     if (shuttingDown) return;
     const inst = pickInstance(cwd);
@@ -169,10 +205,31 @@ export default function (pi: ExtensionAPI) {
       scheduleReconnect(cwd);
       return;
     }
+    ws.onopen = () => {
+      sendActivity(); // 新会话/重连即活跃（"最后打开的"优先）
+    };
     ws.onmessage = (ev: MessageEvent) => {
       try {
         const data = JSON.parse(String(ev.data));
-        setWidgetLines(data?.type === "selection_changed" ? [summarize(data)] : []);
+        if (data?.type === "selection_changed") {
+          setWidgetLines([summarize(data)]);
+          return;
+        }
+        // IDEA "发送到 Pi"：把引用直接粘进输入框，用户在旁边打说明。
+        // 用 setEditorText(getEditorText() + ref) 而非 pasteToEditor：
+        // pasteToEditor 在部分终端下不触发重绘（需滚动才可见），setEditorText 走完整 UI 更新路径。
+        if (data?.type === "pin" && typeof data.reference === "string") {
+          const ui = widgetCtx?.ui;
+          if (!ui) return;
+          try {
+            const existing = ui.getEditorText() ?? "";
+            const sep = existing.length > 0 && !/\s$/.test(existing) ? "\n" : "";
+            ui.setEditorText(existing + sep + data.reference + " ");
+          } catch {
+            ui.pasteToEditor(data.reference + " "); // 兼容回退
+          }
+          return;
+        }
       } catch {
         // 非法消息忽略
       }
@@ -209,6 +266,16 @@ export default function (pi: ExtensionAPI) {
         display: false,
       },
     };
+  });
+
+  // 提交时把文本里的 @/path#L16-23 引用展开为真实代码（"发送到 Pi" 粘进输入框的引用由此生效）
+  pi.on("input", async (event, _ctx) => {
+    if (event.source === "interactive") sendActivity(); // 用户在这个会话打字提交 = 活跃
+    if (event.source !== "interactive") return { action: "continue" };
+    if (!REF_TEST.test(event.text)) return { action: "continue" };
+    const expanded = expandReferences(event.text);
+    if (expanded === event.text) return { action: "continue" };
+    return { action: "transform", text: expanded };
   });
 
   pi.on("session_start", async (_event, ctx) => {

@@ -1,4 +1,4 @@
-package com.fa.piidea.mcp;
+package com.pi.piidea.mcp;
 
 import com.intellij.notification.NotificationGroupManager;
 import com.intellij.notification.NotificationType;
