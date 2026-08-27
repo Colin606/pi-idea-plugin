@@ -1,6 +1,6 @@
 # pi-idea-plugin
 
-<p align="center"><img src="logo.png" width="160" alt="Pi Selection logo"></p>
+<p align="center"><img src="logo.png" width="160" alt="Pi Agent Selection logo"></p>
 
 **English** | [简体中文](README.zh-CN.md)
 
