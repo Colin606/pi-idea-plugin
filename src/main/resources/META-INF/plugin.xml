@@ -1,7 +1,7 @@
 <idea-plugin>
     <id>com.fa.piidea</id>
     <name>Pi Agent Selection</name>
-    <version>1.4.0</version>
+    <version>1.4.2</version>
     <vendor email="colin606@users.noreply.github.com" url="https://github.com/Colin606/pi-idea-plugin">Colin606</vendor>
     <icon>icons/pluginIcon.png</icon>
 

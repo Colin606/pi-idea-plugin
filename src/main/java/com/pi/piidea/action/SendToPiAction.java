@@ -44,15 +44,14 @@ public class SendToPiAction extends AnAction implements DumbAware {
         if (files == null || files.length == 0) return;
         final VirtualFile[] targets = files;
 
-        List<String> refs = ReadAction.compute(() -> {
-            List<String> result = new ArrayList<>();
-            var editor = e.getData(CommonDataKeys.EDITOR);
+        List<String> refs = new ArrayList<>();
+        var editor = e.getData(CommonDataKeys.EDITOR);
+        ReadAction.run(() -> {
             for (VirtualFile file : targets) {
                 if (file.isValid()) {
-                    result.add(ReferenceBuilder.buildReference(editor, file));
+                    refs.add(ReferenceBuilder.buildReference(editor, file));
                 }
             }
-            return result;
         });
         if (refs.isEmpty()) return;
         String payload = String.join("\n", refs);
