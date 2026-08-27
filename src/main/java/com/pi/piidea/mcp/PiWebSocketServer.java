@@ -271,12 +271,13 @@ public class PiWebSocketServer implements Disposable {
 
         SelectionModel sel = editor.getSelectionModel();
         String text = sel.getSelectedText();
-        if (text == null || text.isEmpty()) return null;
+        boolean hasSelection = text != null && !text.isEmpty();
+        String selectedText = hasSelection ? text : "";
 
         SelectionChangedNotification n = new SelectionChangedNotification();
         n.filePath = file.getPath();
         n.fileName = file.getName();
-        n.selectedText = text;
+        n.selectedText = selectedText;
         n.language = file.getExtension();
         n.projectPath = project.getBasePath();
 
@@ -284,10 +285,11 @@ public class PiWebSocketServer implements Disposable {
         n.cursorLine = doc.getLineNumber(caretOffset) + 1;
         n.cursorColumn = caretOffset - doc.getLineStartOffset(n.cursorLine - 1) + 1;
 
-        n.startLine = doc.getLineNumber(sel.getSelectionStart()) + 1;
-        n.endLine = doc.getLineNumber(sel.getSelectionEnd()) + 1;
-        n.startColumn = sel.getSelectionStart() - doc.getLineStartOffset(n.startLine - 1) + 1;
-        n.endColumn = sel.getSelectionEnd() - doc.getLineStartOffset(n.endLine - 1) + 1;
+        // 无选区（光标点击）：行号退化为光标行，仍上报文件级上下文
+        n.startLine = hasSelection ? doc.getLineNumber(sel.getSelectionStart()) + 1 : n.cursorLine;
+        n.endLine = hasSelection ? doc.getLineNumber(sel.getSelectionEnd()) + 1 : n.cursorLine;
+        n.startColumn = hasSelection ? sel.getSelectionStart() - doc.getLineStartOffset(n.startLine - 1) + 1 : n.cursorColumn;
+        n.endColumn = hasSelection ? sel.getSelectionEnd() - doc.getLineStartOffset(n.endLine - 1) + 1 : n.cursorColumn;
         return n;
     }
 

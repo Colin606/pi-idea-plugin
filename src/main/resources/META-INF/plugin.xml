@@ -1,7 +1,7 @@
 <idea-plugin>
     <id>com.fa.piidea</id>
     <name>Pi Agent Selection</name>
-    <version>1.3.0</version>
+    <version>1.4.0</version>
     <vendor email="colin606@users.noreply.github.com" url="https://github.com/Colin606/pi-idea-plugin">Colin606</vendor>
     <icon>icons/pluginIcon.png</icon>
 
@@ -51,12 +51,14 @@
 
     <actions>
         <action id="PiAgent.SendToPi" class="com.pi.piidea.action.SendToPiAction"
+                icon="/icons/piIcon.svg"
                 text="Send to Pi">
             <add-to-group group-id="EditorPopupMenu" anchor="last"/>
             <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
             <add-to-group group-id="EditorTabPopupMenu" anchor="last"/>
         </action>
         <action id="PiAgent.CopyReference" class="com.pi.piidea.action.CopyReferenceAction"
+                icon="/icons/piIcon.svg"
                 text="Copy Reference (@path#L)">
             <add-to-group group-id="EditorPopupMenu" anchor="last"/>
             <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>

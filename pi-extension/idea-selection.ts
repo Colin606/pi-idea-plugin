@@ -217,6 +217,11 @@ export default function (pi: ExtensionAPI) {
           return;
         }
         if (data?.type === "selection_changed") {
+          // 无选区（光标点击）：只显示文件级上下文，不注入
+          if (!data.selected_text) {
+            setWidgetLines([`📄 ${data.file_name ?? basename(data.file_path ?? "")} (L${data.cursor_line ?? data.start_line ?? "?"})`]);
+            return;
+          }
           // 已注入过的选区不再显示（重新选中同段代码也一样）
           setWidgetLines(injectedSet.has(toMarkdown(data)) ? [] : [summarize(data)]);
           return;
@@ -234,6 +239,8 @@ export default function (pi: ExtensionAPI) {
           } catch {
             ui.pasteToEditor(data.reference + " "); // 兼容回退
           }
+          // setEditorText 不触发重绘（TUI 限制）：借 setWidget 的 renderWidgets() -> requestRender() 刷一帧
+          setWidgetLines([]);
           return;
         }
       } catch {
@@ -262,6 +269,7 @@ export default function (pi: ExtensionAPI) {
   pi.on("before_agent_start", async (_event, _ctx) => {
     const sel = await fetchSelection(process.cwd());
     if (!sel) return;
+    if (!sel.selected_text) return; // 无选区：不自动注入（有 @path 引用时仍会展开）
     const content = toMarkdown(sel);
     if (injectedSet.has(content)) return; // 已注入过的选区不再注入（即使仍选中）
     injectedSet.add(content);

@@ -4,7 +4,7 @@ plugins {
 }
 
 group = "com.pi"
-version = "1.3.1"
+version = "1.4.0"
 
 repositories {
     mavenCentral()
@@ -33,9 +33,13 @@ intellijPlatform {
         ides { recommended() }
     }
     publishing {
-        // token 优先级：环境变量 > ~/.gradle/gradle.properties（推荐后者，永久且不进仓库）
-        token = providers.gradleProperty("JETBRAINS_TOKEN")
-            .orElse(providers.environmentVariable("JETBRAINS_TOKEN"))
+        // token 优先级：环境变量 > .env 文件（.env 已 gitignore）
+        val envFile = rootProject.file(".env")
+        token = providers.environmentVariable("JETBRAINS_TOKEN")
+            .orElse(providers.gradleProperty("JETBRAINS_TOKEN"))
+            .orElse(providers.provider {
+                if (envFile.exists()) envFile.readLines().firstOrNull { it.startsWith("JETBRAINS_TOKEN=") }?.substringAfter("=") else null
+            })
             .getOrElse("")
     }
 }

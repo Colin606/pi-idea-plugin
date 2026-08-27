@@ -7,6 +7,7 @@ import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.actionSystem.CommonDataKeys;
 import com.intellij.openapi.application.ReadAction;
+import com.intellij.openapi.fileEditor.FileDocumentManager;
 import com.intellij.openapi.ide.CopyPasteManager;
 import com.intellij.openapi.project.DumbAware;
 import com.intellij.openapi.project.Project;
@@ -39,12 +40,14 @@ public class SendToPiAction extends AnAction implements DumbAware {
         Project project = e.getProject();
         if (project == null) return;
         VirtualFile[] files = e.getData(CommonDataKeys.VIRTUAL_FILE_ARRAY);
+        if (files == null || files.length == 0) files = editorFileFallback(e);
         if (files == null || files.length == 0) return;
+        final VirtualFile[] targets = files;
 
         List<String> refs = ReadAction.compute(() -> {
             List<String> result = new ArrayList<>();
             var editor = e.getData(CommonDataKeys.EDITOR);
-            for (VirtualFile file : files) {
+            for (VirtualFile file : targets) {
                 if (file.isValid()) {
                     result.add(ReferenceBuilder.buildReference(editor, file));
                 }
@@ -68,6 +71,15 @@ public class SendToPiAction extends AnAction implements DumbAware {
     @Override
     public void update(@NotNull AnActionEvent e) {
         VirtualFile[] files = e.getData(CommonDataKeys.VIRTUAL_FILE_ARRAY);
+        if (files == null || files.length == 0) files = editorFileFallback(e);
         e.getPresentation().setEnabledAndVisible(files != null && files.length > 0);
+    }
+
+    /** 编辑器内无 VIRTUAL_FILE_ARRAY 时回退到当前打开的文件。 */
+    private VirtualFile[] editorFileFallback(@NotNull AnActionEvent e) {
+        var editor = e.getData(CommonDataKeys.EDITOR);
+        if (editor == null || editor.isDisposed()) return null;
+        VirtualFile file = FileDocumentManager.getInstance().getFile(editor.getDocument());
+        return file == null ? null : new VirtualFile[]{file};
     }
 }
