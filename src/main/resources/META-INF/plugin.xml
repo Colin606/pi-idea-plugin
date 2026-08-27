@@ -30,16 +30,8 @@
         • Caret-only file context: with no selection, injects the file under the caret (editor fallback included)<br/>
         • Pi extension redraw fix via setEditorText; one-shot selection consumption hardened<br/>
         • Replaced deprecated ReadAction APIs with non-deprecated equivalents<br/>
-        1.3.0:<br/>
-        • Right-click actions: Send to Pi (pushes the selection/file reference straight into your running pi session's input box) and Copy Reference (@path#L16-23) — in editor, project view and editor tab menus<br/>
-        • With multiple pi sessions, references go to the most recently active one<br/>
-        • pi extension expands @path#Lx-y references into code blocks on submit<br/>
-        • New plugin logo<br/>
         1.2.0:<br/>
         • Auto-deploy: the Pi-side extension is bundled in the plugin and installed/updated to ~/.pi/agent/extensions/ automatically on IDE startup (old copy backed up as .bak)<br/>
-        1.1.0:<br/>
-        • Multi-IDE isolation: one service per project window, port auto-allocation (19232+2i), lock-file discovery in ~/.pi/ide/<br/>
-        • Pi extension picks the server whose project matches its working directory (falls back to most recently active)<br/>
         1.0.0:<br/>
         • Initial release<br/>
         • Real-time selection tracking (event-source editor, works with split editors and multiple projects)<br/>
