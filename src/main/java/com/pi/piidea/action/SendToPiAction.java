@@ -6,7 +6,7 @@ import com.intellij.openapi.actionSystem.ActionUpdateThread;
 import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.actionSystem.CommonDataKeys;
-import com.intellij.openapi.application.ReadAction;
+import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.fileEditor.FileDocumentManager;
 import com.intellij.openapi.ide.CopyPasteManager;
 import com.intellij.openapi.project.DumbAware;
@@ -46,7 +46,7 @@ public class SendToPiAction extends AnAction implements DumbAware {
 
         List<String> refs = new ArrayList<>();
         var editor = e.getData(CommonDataKeys.EDITOR);
-        ReadAction.run(() -> {
+        ApplicationManager.getApplication().runReadAction(() -> {
             for (VirtualFile file : targets) {
                 if (file.isValid()) {
                     refs.add(ReferenceBuilder.buildReference(editor, file));
