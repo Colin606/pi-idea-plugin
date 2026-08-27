@@ -20,7 +20,7 @@ import { readdirSync, readFileSync, realpathSync } from "node:fs";
 
 const LOCK_DIR = join(homedir(), ".pi", "ide");
 /** 与插件版本同步递增，插件用它判断是否需要更新已部署的扩展 */
-const EXTENSION_VERSION = "1.3.4";
+const EXTENSION_VERSION = "1.4.0";
 const BASE_HTTP_PORT = 19232;
 const BASE_WS_PORT = 19233;
 const WIDGET_ID = "idea-selection";
@@ -172,6 +172,8 @@ export default function (pi: ExtensionAPI) {
   let reconnectTimer: NodeJS.Timeout | undefined;
   let shuttingDown = false;
   let widgetCtx: any;
+  // 上一次推送是否带选区：选区 -> 光标（取消选中）时清空 widget，而不是显示文件行
+  let hadSelection = false;
   // 已注入内容集合（会话级）：同一选区只注入一次；注入即消费，重新选中也不重复
   const injectedSet = new Set<string>();
 
@@ -217,11 +219,13 @@ export default function (pi: ExtensionAPI) {
           return;
         }
         if (data?.type === "selection_changed") {
-          // 无选区（光标点击）：只显示文件级上下文，不注入
+          // 无选区（光标点击）：若刚取消选中则清空 widget；否则只显示文件级上下文，不注入
           if (!data.selected_text) {
-            setWidgetLines([`📄 ${data.file_name ?? basename(data.file_path ?? "")} (L${data.cursor_line ?? data.start_line ?? "?"})`]);
+            setWidgetLines(hadSelection ? [] : [`📄 ${data.file_name ?? basename(data.file_path ?? "")} (L${data.cursor_line ?? data.start_line ?? "?"})`]);
+            hadSelection = false;
             return;
           }
+          hadSelection = true;
           // 已注入过的选区不再显示（重新选中同段代码也一样）
           setWidgetLines(injectedSet.has(toMarkdown(data)) ? [] : [summarize(data)]);
           return;
@@ -239,8 +243,10 @@ export default function (pi: ExtensionAPI) {
           } catch {
             ui.pasteToEditor(data.reference + " "); // 兼容回退
           }
-          // setEditorText 不触发重绘（TUI 限制）：借 setWidget 的 renderWidgets() -> requestRender() 刷一帧
-          setWidgetLines([]);
+          // setEditorText 不触发重绘（TUI 限制）：widget 两阶段刷新（显示→延时清空）
+          // 强制两次 render，比一次性 setWidget([]) 可靠；顺带给用户可见反馈
+          setWidgetLines(["📥 已接收选区引用，可直接输入说明"]);
+          setTimeout(() => setWidgetLines([]), 1500);
           return;
         }
       } catch {
@@ -296,6 +302,7 @@ export default function (pi: ExtensionAPI) {
   pi.on("session_start", async (_event, ctx) => {
     shuttingDown = false;
     injectedSet.clear(); // 新会话重置：允许重新注入
+    hadSelection = false;
     connect(process.cwd());
     if (ctx.mode === "tui") {
       widgetCtx = ctx;

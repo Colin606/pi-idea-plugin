@@ -25,6 +25,11 @@
     ]]></description>
 
     <change-notes><![CDATA[
+        1.4.0:<br/>
+        • New blocky "P" plugin logo; actions renamed for clarity<br/>
+        • Caret-only file context: with no selection, injects the file under the caret (editor fallback included)<br/>
+        • Pi extension redraw fix via setEditorText; one-shot selection consumption hardened<br/>
+        • Replaced deprecated ReadAction APIs with non-deprecated equivalents<br/>
         1.3.0:<br/>
         • Right-click actions: Send to Pi (pushes the selection/file reference straight into your running pi session's input box) and Copy Reference (@path#L16-23) — in editor, project view and editor tab menus<br/>
         • With multiple pi sessions, references go to the most recently active one<br/>
